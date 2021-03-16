@@ -4,15 +4,14 @@
 # @licence MIT
 # ---
 
-VERSION=202103151416
+EXIT_STATUS=('OK' 'WARNING' 'CRITICAL' 'UNKNOWN')
 
 usage() {
   cat <<EOT
-Usage: $0 [-h] [-V] [-w  WARN_THRE] [-c CRIT_THRE] [-- SIEGE OPTIONS AND ARGUMENTS]
+Usage: $0 [-h] [-w  WARN_THRE] [-c CRIT_THRE] [-- SIEGE OPTIONS AND ARGUMENTS]
 
 PLUGIN OPTIONS
   -h             help
-  -V             version
   -w  WARN_THRE  warning thresholds
   -c  CRIT_THRE  critical thresholds
 
@@ -32,28 +31,59 @@ SIEGE OPTIONS AND ARGUMENTS
 
 EXAMPLE:
   ./check_siege.sh -w 'Res=0.20,rate=30:' -c 'Res=0.50,rate=20:' -- -r 10 -c 25 -f urls.txt
+  ./check_siege.sh -w Res=0.20 -w rate=30: -c Res=0.50 -c rate=20: -- -r 10 -c 25 -f urls.txt
 
 SEE ALSO:
   https://www.monitoring-plugins.org/doc/guidelines.html#THRESHOLDFORMAT
 EOT
 }
 
+err() { 
+  echo "UNKNOWN: $1"
+  exit 3
+}
+
+validate_threshold() { 
+  [[ ! $OPTARG =~ ^[A-Za-z]+=[0-9]+(.[0-9]+)?:?(,[A-Za-z]+=[0-9]+(.[0-9]+)?:?)*$ ]] && 
+    err "threshold format error!"
+}
+
 # input options
-while getopts "hVw:c:-" opt; do
+declare -A WARN_THRE CRIT_THRE
+while getopts "hw:c:-" opt; do
   case $opt in
     h) usage && exit 0;;
-    V) echo $VERSION && exit 0;;
-    w)
-      [[ ! $OPTARG =~ ^[1-9][0-9]*$ ]] && \
-        echo "MIN: integer value expected!" && exit 1
-      MIN=$OPTARG
-      ;;
-    c)
-      URL=$OPTARG
-      ;;
+    w) 
+      validate_threshold
+      for t in ${OPTARG//,/ }; do
+        WARN_THRE[${t%=*}]=${t#*=}
+      done;;
+    c) 
+      validate_threshold
+      for t in ${OPTARG//,/ }; do
+        CRIT_THRE[${t%=*}]=${t#*=}
+      done;;
   esac
 done
 shift $((OPTIND-1))
+
+if [[ ${#WARN_THRE[*]} -gt 0 ]]; then
+  for key in ${!WARN_THRE[*]}; do
+    [[ -z ${CRIT_THRE[$key]} ]] && continue
+    warn=${WARN_THRE[$key]}; crit=${CRIT_THRE[$key]} 
+    if [[ $warn == *.* || $crit == *.* ]]; then
+      warnDec=${warn#*.}; critDec=${crit#*.}
+      [[ $warn != *.* || $crit != *.* || ${#warnDec} -ne ${#critDec} ]] &&
+        err "'$key' - same thresholds precision required!"
+      # strip decimal point for comparision
+      warn=${warn/./}; crit=${crit/./}
+    fi
+    [[ $warn == *: || $crit == *: ]] && [[ $warn != *: || $crit != *: ]] && 
+        err "'$key' - mixed thresholds range definition error!"
+    [[ $warn == *: &&  ${warn/:/} -le ${crit/:/} || $warn != *: && $warn -ge $crit ]] &&
+        err "'$key' - thresholds order error!"
+  done
+fi
 
 units() { [[ $line == *[0-9] ]] && echo '' || echo ${line##* }; }
 val() { local v=${line#*:}; [[ $v == *[0-9] ]] && echo $v || echo ${v% *}; }
@@ -95,5 +125,4 @@ while read line; do
   [[ $line == Longest* || $line == Shortest* ]] && perfData+='s'
 done < <(siege $@ 2>&1)
 
-echo "UNKNOWN: Investigate issues by executing \`siege $@\`"
-exit 3
+err "Investigate issues by executing \`siege $@\`"
