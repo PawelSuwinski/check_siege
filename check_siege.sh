@@ -39,17 +39,44 @@ EOT
 }
 
 err() {
-  echo "${EXIT_STATUS[3]}: $1"
+  echo ${EXIT_STATUS[3]}: $@
   exit 3
+}
+
+# split float to further significant numbers for comparison
+split() {
+  local IFS='.' num dec n prec
+  read num dec <<< "$1"
+  prec=${#dec}
+  # convert to int to avoid leading zeros issues
+  echo -n $((10#$num+0)) 
+  for((n=0; n < prec; n++)); do
+    echo -n '' ${dec:$n:1}
+  done
+}
+# cmp a b : 0 - a == b, 1 - a < b, 2 - a > b
+cmp() { 
+  local a=($(split $1)) b=($(split $2)) n len
+  [[ ${#a[*]} -gt ${#b[*]} ]] && len=${#a[*]} || len=${#b[*]}
+  for ((n=0; n<len; n++)); do
+    if [[ ${a[$n]:-0} -ne ${b[$n]:-0} ]]; then
+      [[ ${a[$n]:-0} -lt ${b[$n]:-0} ]] && return 1 || return 2
+    fi
+  done
+}
+# out_of_range value threshold
+out_of_range() { 
+  cmp $1 ${2/:/}
+  [[ $2 == *: && $? -eq 1  || $2 != *: && $? -eq 2 ]]
 }
 
 # Parse input options.
 declare -A WARN_THRE CRIT_THRE
 validate_threshold() {
   [[ ! $OPTARG =~ ^[A-Za-z]+=[0-9]+(.[0-9]+)?:?(,[A-Za-z]+=[0-9]+(.[0-9]+)?:?)*$ ]] &&
-    err "threshold format error!"
+    err 'threshold format error!'
 }
-while getopts "hw:c:-" opt; do
+while getopts 'hw:c:-' opt; do
   case $opt in
     h) usage && exit 0;;
     w)
@@ -70,34 +97,37 @@ shift $((OPTIND-1))
 if [[ ${#WARN_THRE[*]} -gt 0 ]]; then
   for key in ${!WARN_THRE[*]}; do
     [[ -z ${CRIT_THRE[$key]} ]] && continue
-    warn=${WARN_THRE[$key]}; crit=${CRIT_THRE[$key]}
-    if [[ $warn == *.* || $crit == *.* ]]; then
-      warnDec=${warn#*.}; critDec=${crit#*.}
-      [[ $warn != *.* || $crit != *.* || ${#warnDec} -ne ${#critDec} ]] &&
-        err "'$key' - same thresholds precision required!"
-      # strip decimal point for comparision
-      warn=${warn/./}; crit=${crit/./}
-    fi
+    warn=${WARN_THRE[$key]} crit=${CRIT_THRE[$key]}
     [[ $warn == *: || $crit == *: ]] && [[ $warn != *: || $crit != *: ]] &&
-        err "'$key' - mixed thresholds range definition error!"
-    [[ $warn == *: &&  ${warn/:/} -le ${crit/:/} || $warn != *: && $warn -ge $crit ]] &&
-        err "'$key' - thresholds order error!"
+      err "'$key' - mixed thresholds range definition error!"
+    cmp ${warn/:/} ${crit/:}
+    [[ $warn == *: && $? -ne 2 || $warn != *: && $? -ne 1 ]] &&
+      err "'$key' - thresholds order error!"
   done
 fi
 
 # Default exit code.
 exitCode=0
-# Avaibility default thresholds: critical 0%, warn != 100%.
-declare -A DEF_WARN_THRE=([Avail]='100.00:') DEF_CRIT_THRE=([Avail]='1.00:')
+# Availability default thresholds: critical 0%, warn != 100%.
+declare -A DEF_WARN_THRE=([Avail]='100:') DEF_CRIT_THRE=([Avail]='1:')
 
 # Siege output parser helpers.
-val() { local v=${line#*:}; [[ $v != *[0-9] ]] && v=${v% *}; echo -n $v; }
-perf() { local v="${line#*:}"; echo -n "'${line%%:*}'="; echo -n ${v// /}; }
+val() { 
+  local v=${line#*:}
+  [[ $v != *[0-9] ]] && v=${v% *}
+  echo -n ${v:-0}
+}
+perf() { 
+  local v="${line#*:}"
+  echo -n "'${line%%:*}'="
+  echo -n ${v// /}
+}
 warn() {
   for key in ${!WARN_THRE[*]} ${!DEF_WARN_THRE[*]}; do
     [[ ${line%%:*} != *${key}* ]] && continue
     [[ -n ${WARN_THRE[$key]} ]] &&
       echo -n ${WARN_THRE[$key]} || echo -n ${DEF_WARN_THRE[$key]}
+    break 
   done
 }
 crit() {
@@ -105,13 +135,8 @@ crit() {
     [[ ${line%%:*} != *${key}* ]] && continue
     [[ -n ${CRIT_THRE[$key]} ]] &&
       echo -n ${CRIT_THRE[$key]} || echo -n ${DEF_CRIT_THRE[$key]}
+    break
   done
-}
-out_of_range() { 
-# FIXME
-  [[ $line == Resp* ]] && return 1
-  [[ $line == Throu* ]] && return 0
-  return 1
 }
 
 # Parse siege output.
@@ -122,7 +147,7 @@ while read line; do
     # Successful transactions default thresholds: critical 0, warn < hits
     # Failed transactions default thresholds: critical == hits, warn > 0
     DEF_WARN_THRE+=([Success]="${hits}:" [Fail]='0')
-    DEF_CRIT_THRE+=([Success]='1:' [Fail]="$((${hits}-1)):")
+    DEF_CRIT_THRE+=([Success]='1:' [Fail]="$((${hits}-1))")
     continue
   fi
    
@@ -133,7 +158,11 @@ while read line; do
   if [[ -n $hits && $line == '' ]]; then
     # normalize seconds according to SI
     perfData=${perfData//secs/s}; perfData=${perfData//sec/s}
-    echo ${EXIT_STATUS[$exitCode]}: $exitMsg '|' $perfData
+    echo -n ${EXIT_STATUS[$exitCode]}:
+    [[ $exitCode -eq 0 ]] && echo -n $succMsg
+    [[ -n $critAlerts ]] && echo -n " Critical alert for: ${critAlerts[*]}."
+    [[ -n $warnAlerts ]] && echo -n " Warning alert for: ${warnAlerts[*]}."
+    echo " | $perfData"
     exit $exitCode
   fi
 
@@ -144,22 +173,24 @@ while read line; do
   [[ $line == Longest* || $line == Shortest* ]] &&
     [[ $line == *[0-9] ]] && perfData+='s'
 
-  # thresholds 
-  warn=$(warn) crit=$(crit) 
+  # format exit message based on successful stat line
+  [[ $line == Success* ]] && succMsg="${line/:/} of $hits."
+
+  # add and process thresholds if not empty
+  warn=$(warn) crit=$(crit)
+  [[ -z $warn && -z $crit ]] && continue
+
   perfData+=";$warn;$crit"
 
-  # add min/ max
+  # add min/ max for successful and failed transactions
   [[ $line == Success* || $line == Fail* ]] && perfData+=";0;${hits}"
   
-  # set alert status code on value out of range
-  if [[ -n $warn || -n $crit ]]; then
-    value=$(val)
-    [[ $exitCode -lt 2 ]] && out_of_range $value $crit && exitCode=2
-    [[ $exitCode -lt 1 ]] && out_of_range $value $warn && exitCode=1
-  fi
-
-  # format exit message based on successful stat line
-  [[ $line == Success* ]] && exitMsg="${line/:/} of $hits."
+  # set alerts and exit code on value out of range
+  value=$(val)
+  [[ -n $crit ]] && out_of_range $value $crit && critAlerts+=(${line%:*}) &&
+    [[ $exitCode -lt 2 ]] && exitCode=2
+  [[ -n $warn ]] && out_of_range $value $warn && warnAlerts+=(${line%:*}) &&
+    [[ $exitCode -lt 1 ]] && exitCode=1
 done < <(siege $@ 2>&1)
 
 err "Investigate issues by executing \`siege $@\`"
