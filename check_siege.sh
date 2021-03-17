@@ -51,7 +51,7 @@ split() {
   prec=${#dec}
   # convert to int to avoid leading zeros issues
   echo -n $((10#$num+0)) 
-  for((n=0; n < prec; n++)); do
+  for ((n=0; n < prec; n++)); do
     echo -n '' ${dec:$n:1}
   done
 }
@@ -59,7 +59,7 @@ split() {
 cmp() { 
   local a=($(split $1)) b=($(split $2)) n len
   [[ ${#a[*]} -gt ${#b[*]} ]] && len=${#a[*]} || len=${#b[*]}
-  for ((n=0; n<len; n++)); do
+  for ((n=0; n < len; n++)); do
     if [[ ${a[$n]:-0} -ne ${b[$n]:-0} ]]; then
       [[ ${a[$n]:-0} -lt ${b[$n]:-0} ]] && return 1 || return 2
     fi
@@ -124,20 +124,10 @@ perf() {
   echo -n "'${line%%:*}'="
   echo -n ${v// /}
 }
-warn() {
-  for key in ${!WARN_THRE[*]} ${!DEF_WARN_THRE[*]}; do
-    [[ ${line%%:*} != *${key}* ]] && continue
-    [[ -n ${WARN_THRE[$key]} ]] &&
-      echo -n ${WARN_THRE[$key]} || echo -n ${DEF_WARN_THRE[$key]}
-    break 
-  done
-}
-crit() {
-  for key in ${!CRIT_THRE[*]} ${!DEF_CRIT_THRE[*]}; do
-    [[ ${line%%:*} != *${key}* ]] && continue
-    [[ -n ${CRIT_THRE[$key]} ]] &&
-      echo -n ${CRIT_THRE[$key]} || echo -n ${DEF_CRIT_THRE[$key]}
-    break
+thre() {
+  local keys=($1) thresholds=($2) n
+  for ((n=0; $n < ${#keys[*]}; n++)); do 
+    [[ ${line%%:*} == *${keys[$n]}* ]] && echo -n ${thresholds[$n]} && break
   done
 }
 alerts() {
@@ -187,7 +177,12 @@ while read line; do
     [[ $line == *[0-9] ]] && perfData+='s'
 
   # add and process thresholds if not empty
-  warn=$(warn) crit=$(crit)
+  warn=$(thre "${!WARN_THRE[*]}" "${WARN_THRE[*]}")
+  crit=$(thre "${!CRIT_THRE[*]}" "${CRIT_THRE[*]}")
+  if [[ -z $warn && -z $crit ]]; then
+    warn=$(thre "${!DEF_WARN_THRE[*]}" "${DEF_WARN_THRE[*]}")
+    crit=$(thre "${!DEF_CRIT_THRE[*]}" "${DEF_CRIT_THRE[*]}")
+  fi
   [[ -z $warn && -z $crit ]] && continue
 
   perfData+=";$warn;$crit"
