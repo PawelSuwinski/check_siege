@@ -8,10 +8,11 @@ EXIT_STATUS=('OK' 'WARNING' 'CRITICAL' 'UNKNOWN')
 
 usage() {
   cat <<EOT
-Usage: $0 [-h] [-w  WARN_THRE] [-c CRIT_THRE] [-- SIEGE OPTIONS AND ARGUMENTS]
+Usage: $0 [-h] [-v] [-w WARN_THRE] [-c CRIT_THRE] [-- SIEGE OPTIONS AND ARGUMENTS]
 
 PLUGIN OPTIONS
   -h             help
+  -v             print alerts list on error
   -w  WARN_THRE  warning thresholds
   -c  CRIT_THRE  critical thresholds
 
@@ -76,9 +77,10 @@ validate_threshold() {
   [[ ! $OPTARG =~ ^[A-Za-z]+=[0-9]+(.[0-9]+)?:?(,[A-Za-z]+=[0-9]+(.[0-9]+)?:?)*$ ]] &&
     err 'threshold format error!'
 }
-while getopts 'hw:c:-' opt; do
+while getopts 'hvw:c:-' opt; do
   case $opt in
     h) usage && exit 0;;
+    v) VERBOSE='true';;
     w)
       validate_threshold
       for t in ${OPTARG//,/ }; do
@@ -138,6 +140,12 @@ crit() {
     break
   done
 }
+alerts() {
+  echo -n " $1: $2"
+  shift 2
+  [[ -n $@ ]] && printf ', %s' "$@"
+  echo -n '.'
+}
 
 # Parse siege output.
 while read line; do
@@ -158,11 +166,16 @@ while read line; do
   if [[ -n $hits && $line == '' ]]; then
     # normalize seconds according to SI
     perfData=${perfData//secs/s}; perfData=${perfData//sec/s}
-    echo -n ${EXIT_STATUS[$exitCode]}:
-    [[ $exitCode -eq 0 ]] && echo -n $succMsg
-    [[ -n $critAlerts ]] && echo -n " Critical alert for: ${critAlerts[*]}."
-    [[ -n $warnAlerts ]] && echo -n " Warning alert for: ${warnAlerts[*]}."
-    echo " | $perfData"
+    echo -n "${EXIT_STATUS[$exitCode]}: $hits transactions with "
+    [[ $exitCode -eq 0 ]] && echo -n 'no' ||
+      echo -n "${#critAlerts[*]} critical and ${#warnAlerts[*]} warning"
+    echo -n ' alerts.'
+    # list alerts on verbose
+    if [[ -n $VERBOSE ]]; then
+      [[ ${#critAlerts[*]} -gt 0 ]] && alerts 'Critical' "${critAlerts[@]}"
+      [[ ${#warnAlerts[*]} -gt 0 ]] && alerts 'Warning' "${warnAlerts[@]}"
+    fi
+    echo ' |' $perfData
     exit $exitCode
   fi
 
@@ -172,9 +185,6 @@ while read line; do
   # add omitted units 
   [[ $line == Longest* || $line == Shortest* ]] &&
     [[ $line == *[0-9] ]] && perfData+='s'
-
-  # format exit message based on successful stat line
-  [[ $line == Success* ]] && succMsg="${line/:/} of $hits."
 
   # add and process thresholds if not empty
   warn=$(warn) crit=$(crit)
@@ -187,10 +197,13 @@ while read line; do
   
   # set alerts and exit code on value out of range
   value=$(val)
-  [[ -n $crit ]] && out_of_range $value $crit && critAlerts+=(${line%:*}) &&
+  if [[ -n $crit ]] && out_of_range $value $crit; then
+    critAlerts+=("${line%:*}")
     [[ $exitCode -lt 2 ]] && exitCode=2
-  [[ -n $warn ]] && out_of_range $value $warn && warnAlerts+=(${line%:*}) &&
+  elif [[ -n $warn ]] && out_of_range $value $warn; then
+    warnAlerts+=("${line%:*}")
     [[ $exitCode -lt 1 ]] && exitCode=1
+  fi
 done < <(siege $@ 2>&1)
 
 err "Investigate issues by executing \`siege $@\`"
