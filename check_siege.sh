@@ -52,7 +52,7 @@ declare -A CONSTRAINTS=(
 )
 
 err() {
-  echo ${EXIT_STATUS[3]}: $@
+  echo ${EXIT_STATUS[3]}: "$@"
   exit 3
 }
 
@@ -211,6 +211,6 @@ while read line; do
     warnAlerts+=("${line%:*}")
     [[ $exitCode -lt 1 ]] && exitCode=1
   fi
-done < <(siege $@ 2>&1)
+done < <(siege "$@" 2>&1)
 
 err "Investigate issues by executing \`siege $@\`"
