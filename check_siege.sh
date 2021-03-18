@@ -1,6 +1,7 @@
 #! /bin/bash
 #
 # @author Paweł Suwiński, psuw@wp.pl
+# @copyright Copyright (c) 2021, Paweł Suwiński
 # @licence MIT
 # ---
 
