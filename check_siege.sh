@@ -17,10 +17,14 @@ PLUGIN OPTIONS
   -c  CRIT_THRE  critical thresholds
 
 THRESHOLDS
-   Thresholds are given with tha name of  measured quantities  which are
+   Thresholds are given with the name of measured quantities which are
    searched using wildcards so make sure that uniq phrase was given.
-
    Supported are only 'less than' and 'greather than' range definitions.
+
+   Default threshold sets, override if needed:
+    - Availability: critical 0%, warn != 100%.
+    - Successful transactions: critical 0, warn < hits
+    - Failed transactions: critical == hits, warn > 0
 
    In an example below for 'Response time' (*Res*) warning alert is set if
    value is greathen than 0.20 and critical if  value is greather than 0.50
