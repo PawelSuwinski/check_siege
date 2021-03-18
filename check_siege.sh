@@ -39,6 +39,12 @@ SEE ALSO:
 EOT
 }
 
+# @see 'PERFORMANCE STATISTICS' in siege manual
+declare -A CONSTRAINTS=(
+  [STAT]='^[A-Z][a-z]+( [a-z]+)?:[[:blank:]]+[0-9]+(\.[0-9]+)?( (%|[A-Za-z]+(/[a-z]+)?))?$'
+  [THRE]='^[A-Za-z]+=[0-9]+(.[0-9]+)?:?(,[A-Za-z]+=[0-9]+(.[0-9]+)?:?)*$'
+)
+
 err() {
   echo ${EXIT_STATUS[3]}: $@
   exit 3
@@ -71,12 +77,12 @@ out_of_range() {
   [[ $2 == *: && $? -eq 1  || $2 != *: && $? -eq 2 ]]
 }
 
+validate_threshold() {
+  [[ ! $OPTARG =~ ${CONSTRAINTS[THRE]} ]] && err 'threshold format error!'
+}
+
 # Parse input options.
 declare -A WARN_THRE CRIT_THRE
-validate_threshold() {
-  [[ ! $OPTARG =~ ^[A-Za-z]+=[0-9]+(.[0-9]+)?:?(,[A-Za-z]+=[0-9]+(.[0-9]+)?:?)*$ ]] &&
-    err 'threshold format error!'
-}
 while getopts 'hvw:c:-' opt; do
   case $opt in
     h) usage && exit 0;;
@@ -140,7 +146,7 @@ alerts() {
 # Parse siege output.
 while read line; do
   # mark start of statistics and init  perf data
-  if [[ $line == Transactions:* ]]; then
+  if [[ $line == Transactions:* && $line =~ ${CONSTRAINTS[STAT]} ]]; then
     hits=$(val); perfData=$(perf)
     # Successful transactions default thresholds: critical 0, warn < hits
     # Failed transactions default thresholds: critical == hits, warn > 0
@@ -148,9 +154,6 @@ while read line; do
     DEF_CRIT_THRE+=([Success]='1:' [Fail]="$((${hits}-1))")
     continue
   fi
-   
-  # omit not statistics output line or empty results
-  [[ -z $hits  || $hits -eq 0 ]] && continue
 
   # normalize, print output end exit on end of statistics
   if [[ -n $hits && $line == '' ]]; then
@@ -168,6 +171,9 @@ while read line; do
     echo ' |' $perfData
     exit $exitCode
   fi
+
+  # omit not statistics output line or empty results
+  [[ -z $hits  || $hits -eq 0 || ! $line =~ ${CONSTRAINTS[STAT]} ]] && continue
 
   # performance data
   perfData+=" $(perf)"
