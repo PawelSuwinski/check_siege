@@ -162,7 +162,7 @@ while read line; do
   fi
 
   # normalize, print output end exit on end of statistics
-  if [[ -n $hits && $line == '' ]]; then
+  if [[ $hits -gt 0 && $line == '' ]]; then
     # normalize seconds according to SI
     perfData=${perfData//secs/s}; perfData=${perfData//sec/s}
     echo -n "${EXIT_STATUS[$exitCode]}: $hits transactions with "
