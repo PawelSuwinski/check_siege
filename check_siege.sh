@@ -19,27 +19,28 @@ PLUGIN OPTIONS
 
 THRESHOLDS
    Thresholds are given with the name of measured quantities which are
-   searched using wildcards so make sure that uniq phrase was given.
+   searched using wildcards so make sure that unique phrases was used.
    Supported are only 'less than' and 'greather than' range definitions.
+   See the example below for the required format. 
 
    Default threshold sets, override if needed:
     - Availability: critical 0%, warn != 100%.
     - Successful transactions: critical 0, warn < hits
     - Failed transactions: critical == hits, warn > 0
 
-   In an example below for 'Response time' (*Res*) warning alert is set if
-   value is greathen than 0.20 and critical if  value is greather than 0.50
-   and for 'Transaction rate'(*rate*) warning if value is less than 30 and
-   critical if value less than 20.
-
 SIEGE OPTIONS AND ARGUMENTS
   See siege man page: siege(1).
 
 EXAMPLE:
-  ./check_siege.sh -w 'Res=0.20,rate=30:' -c 'Res=0.50,rate=20:' -- -r 10 -c 25 -f urls.txt
-  ./check_siege.sh -w Res=0.20 -w rate=30: -c Res=0.50 -c rate=20: -- -r 10 -c 25 -f urls.txt
+  check_siege.sh -w Res=0.2,rate=30: -c Res=0.5,rate=20: -- -r 5 -c 25 -f urls.txt
+  check_siege.sh -w Res=0.2 -w rate=30: -c Res=0.5 -c rate=20: -- -r 5 -c 25 -f urls.txt
+
+  'Response time' (*Res*) warning alert is set on value greather than 0.20
+  and critical on value greather than 0.50 and 'Transaction rate' (*rate*)
+  warning on value less than 30 and critical on value less than 20.
 
 SEE ALSO:
+  https://www.monitoring-plugins.org/doc/guidelines.html#AEN78
   https://www.monitoring-plugins.org/doc/guidelines.html#THRESHOLDFORMAT
 EOT
 }
